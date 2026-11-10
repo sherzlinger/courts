@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Park Tennis Courts</title>
+<title>Public Tennis Courts</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   :root { --bg: #f4f6f9; --card: #ffffff; --text: #16202c; --muted: #5b6878; --accent: #2f6f4f; --line: #d9dee5; }
@@ -38,7 +38,7 @@
 <div class="app">
   <aside>
     <header>
-      <h1>Park Tennis Courts</h1>
+      <h1>Public Tennis Courts</h1>
       <div class="bar" id="areas" role="tablist" aria-label="Area"></div>
       <div class="bar" style="margin-top:8px">
         <button class="chip" id="lights" aria-pressed="false">Lights likely</button>
@@ -59,6 +59,7 @@
   function el(t, a, kids) { var n = document.createElement(t); for (var k in a || {}) { if (k === "text") n.textContent = a[k]; else n.setAttribute(k, a[k]); } (kids || []).forEach(function (c) { n.appendChild(c); }); return n; }
   function gmaps(c) { return "https://www.google.com/maps/search/?api=1&query=" + c.lat + "," + c.lon; }
   function label(c) { return c.name + (c.courts > 1 ? " · " + c.courts + " courts" : ""); }
+  function kindNote(c) { return c.kind && c.kind !== "Park" ? c.kind + " (open to public, checked) · " : ""; }
   function popup(c) {
     var box = el("div", { class: "pop" });
     if (c.photo) box.appendChild(el("img", { src: c.photo, alt: "Aerial view of " + c.name, loading: "lazy" }));
@@ -76,7 +77,7 @@
     Object.keys(markers).forEach(function (k) { map.removeLayer(markers[k]); }); markers = {};
     show.forEach(function (c) {
       var m = L.marker([c.lat, c.lon], { title: label(c) }).bindPopup(function () { return popup(c); }).addTo(map); markers[c.n] = m;
-      var b = el("button", { type: "button" }, [el("div", { text: label(c) }), el("div", { class: "meta", text: c.lights === "likely" ? "Lights likely" : "Lights unknown" })]);
+      var b = el("button", { type: "button" }, [el("div", { text: label(c) }), el("div", { class: "meta", text: kindNote(c) + (c.lights === "likely" ? "Lights likely" : "Lights unknown") })]);
       b.addEventListener("click", function () { map.setView([c.lat, c.lon], 18); m.openPopup(); });
       var g = el("a", { class: "gm", href: gmaps(c), target: "_blank", rel: "noopener", "aria-label": "Open " + label(c) + " in Google Maps", text: "Google Maps ↗" });
       list.appendChild(el("li", {}, [b, g]));
