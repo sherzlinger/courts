@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Park Tennis Courts</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --bg: #f4f6f9; --card: #ffffff; --text: #16202c; --muted: #5b6878; --accent: #2f6f4f; --line: #d9dee5; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #11161d; --card: #1a212b; --text: #e8edf3; --muted: #9aa7b6; --accent: #6fcf97; --line: #2a3340; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  .app { display: grid; grid-template-columns: 340px 1fr; height: 100%; }
+  aside { overflow: auto; border-right: 1px solid var(--line); background: var(--card); }
+  header { padding: 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); z-index: 1; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button.chip { min-height: 40px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+  a.chip { display: inline-flex; align-items: center; text-decoration: none; min-height: 40px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--text); font-weight: 600; font-size: 14px; }
+  button.chip[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .count { color: var(--muted); font-size: 13px; }
+  ul { list-style: none; margin: 0; padding: 8px; }
+  li button { width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; margin-bottom: 6px; cursor: pointer; }
+  li button:hover, li button[aria-current="true"] { border-color: var(--accent); }
+  .meta { color: var(--muted); font-size: 13px; }
+  #map { height: 100%; }
+  .pop img { width: 220px; max-width: 100%; border-radius: 8px; display: block; margin-bottom: 6px; }
+  .pop a, a.gm { color: var(--accent); font-weight: 600; }
+  .pop .links { display: flex; gap: 14px; margin-top: 4px; }
+  li { position: relative; }
+  li button { padding-right: 118px; }
+  a.gm { position: absolute; right: 12px; top: 12px; font-size: 13px; text-decoration: none; padding: 4px 0; }
+  footer { padding: 12px 16px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 720px) { .app { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; } aside { order: 2; border-right: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <header>
+      <h1>Park Tennis Courts</h1>
+      <div class="bar" id="areas" role="tablist" aria-label="Area"></div>
+      <div class="bar" style="margin-top:8px">
+        <button class="chip" id="lights" aria-pressed="false">Lights likely</button>
+        <span class="count" id="count"></span>
+      </div>
+    </header>
+    <ul id="list" aria-label="Courts"></ul>
+    <footer>Courts found in public USDA NAIP aerial imagery; may be inaccurate. Map © OpenStreetMap contributors.</footer>
+  </aside>
+  <div id="map" role="region" aria-label="Map"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function () {
+  var map = L.map("map", { zoomControl: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+  var all = [], markers = {}, lightsOnly = false, sel = null;
+  function el(t, a, kids) { var n = document.createElement(t); for (var k in a || {}) { if (k === "text") n.textContent = a[k]; else n.setAttribute(k, a[k]); } (kids || []).forEach(function (c) { n.appendChild(c); }); return n; }
+  function gmaps(c) { return "https://www.google.com/maps/search/?api=1&query=" + c.lat + "," + c.lon; }
+  function label(c) { return c.name + (c.courts > 1 ? " · " + c.courts + " courts" : ""); }
+  function popup(c) {
+    var box = el("div", { class: "pop" });
+    if (c.photo) box.appendChild(el("img", { src: c.photo, alt: "Aerial view of " + c.name, loading: "lazy" }));
+    box.appendChild(el("strong", { text: label(c) }));
+    box.appendChild(el("div", { class: "meta", text: (c.lights === "likely" ? "Lights likely" : "Lights unknown") + (c.confirmed ? " · confirmed" : "") }));
+    box.appendChild(el("div", { class: "links" }, [
+      el("a", { href: gmaps(c), target: "_blank", rel: "noopener", text: "Open in Google Maps" }),
+      el("a", { href: "https://www.google.com/maps/dir/?api=1&destination=" + c.lat + "," + c.lon, target: "_blank", rel: "noopener", text: "Directions" })
+    ]));
+    return box;
+  }
+  function render() {
+    var show = all.filter(function (c) { return !lightsOnly || c.lights === "likely"; });
+    var list = document.getElementById("list"); list.replaceChildren();
+    Object.keys(markers).forEach(function (k) { map.removeLayer(markers[k]); }); markers = {};
+    show.forEach(function (c) {
+      var m = L.marker([c.lat, c.lon], { title: label(c) }).bindPopup(function () { return popup(c); }).addTo(map); markers[c.n] = m;
+      var b = el("button", { type: "button" }, [el("div", { text: label(c) }), el("div", { class: "meta", text: c.lights === "likely" ? "Lights likely" : "Lights unknown" })]);
+      b.addEventListener("click", function () { map.setView([c.lat, c.lon], 18); m.openPopup(); });
+      var g = el("a", { class: "gm", href: gmaps(c), target: "_blank", rel: "noopener", "aria-label": "Open " + label(c) + " in Google Maps", text: "Google Maps ↗" });
+      list.appendChild(el("li", {}, [b, g]));
+    });
+    document.getElementById("count").textContent = show.length + " of " + all.length + " courts";
+  }
+  document.getElementById("lights").addEventListener("click", function () { lightsOnly = !lightsOnly; this.setAttribute("aria-pressed", String(lightsOnly)); render(); });
+  function loadArea(a, btns) {
+    btns.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.file === a.file)); });
+    try { localStorage.setItem("area", a.file); } catch (e) {}
+    fetch(a.file).then(function (r) { return r.json(); }).then(function (d) {
+      all = d;
+      if (d.length) map.fitBounds(d.map(function (c) { return [c.lat, c.lon]; }), { padding: [30, 30] }); else map.setView([37.5, -120], 6);
+      render();
+    });
+  }
+  fetch("areas.json").then(function (r) { return r.json(); }).then(function (areas) {
+    var bar = document.getElementById("areas"), btns = [], saved = null;
+    try { saved = localStorage.getItem("area"); } catch (e) {}
+    areas.forEach(function (a) {
+      var b = el("button", { type: "button", class: "chip", role: "tab", "data-file": a.file, text: a.label + " (" + a.count + ")" });
+      b.addEventListener("click", function () { loadArea(a, btns); });
+      btns.push(b); bar.appendChild(b);
+    });
+    var first = areas.filter(function (a) { return a.file === saved; })[0] || areas[0];
+    if (first) loadArea(first, btns);
+  });
+})();
+</script>
+</body>
+</html>
