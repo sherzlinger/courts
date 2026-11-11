@@ -49,6 +49,7 @@
         <button class="chip" data-kind="Park" aria-pressed="true">Parks</button>
         <button class="chip" data-kind="School" aria-pressed="true">Schools</button>
         <button class="chip" data-kind="Club" aria-pressed="true">Clubs</button>
+        <button class="chip" data-kind="Unverified" aria-pressed="true">Unverified</button>
       </div>
       <div class="bar" style="margin-top:8px">
         <button class="chip" id="lights" aria-pressed="false">Lights likely</button>
@@ -69,8 +70,8 @@
   var map = L.map("map", { zoomControl: true });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
   var all = [], markers = {}, sel = null, me = null;
-  var F = { kinds: { Park: true, School: true, Club: true }, lights: false, confirmed: false, multi: false, q: "" };
-  try { var saved = JSON.parse(localStorage.getItem("filters") || "null"); if (saved && saved.kinds) { F = saved; F.q = ""; } } catch (e) {}
+  var F = { kinds: { Park: true, School: true, Club: true, Unverified: true }, lights: false, confirmed: false, multi: false, q: "" };
+  try { var saved = JSON.parse(localStorage.getItem("filters") || "null"); if (saved && saved.kinds) { F = saved; F.q = ""; if (!("Unverified" in F.kinds)) F.kinds.Unverified = true; } } catch (e) {}
   function save() { try { localStorage.setItem("filters", JSON.stringify(F)); } catch (e) {} }
   function kindOf(c) { return c.kind || "Park"; }
   function km(a, b, c, d) { var r = Math.PI / 180, x = (d - b) * r * Math.cos((a + c) / 2 * r), y = (c - a) * r; return 6371 * Math.sqrt(x * x + y * y); }
@@ -83,16 +84,25 @@
     return true;
   }
   function el(t, a, kids) { var n = document.createElement(t); for (var k in a || {}) { if (k === "text") n.textContent = a[k]; else n.setAttribute(k, a[k]); } (kids || []).forEach(function (c) { n.appendChild(c); }); return n; }
-  function gmaps(c) { return "https://www.google.com/maps/search/?api=1&query=" + c.lat + "," + c.lon; }
+  // Named sites search the place by name near its coordinates, so Google opens the park's listing (with "Popular
+  // times" when Google has it); unnamed sites open a pin. Only a link the visitor taps: nothing is fetched or scraped.
+  function named(c) { return !/^(Park court|School court|Club court|Courts \(unverified\))$/.test(c.name); }
+  function gmaps(c) {
+    var q = named(c) ? c.name + " " + c.lat.toFixed(4) + "," + c.lon.toFixed(4) : c.lat + "," + c.lon;
+    return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+  }
   function label(c) { return c.name + (c.courts > 1 ? " · " + c.courts + " courts" : ""); }
-  function kindNote(c) { return c.kind && c.kind !== "Park" ? c.kind + " (open to public, checked) · " : ""; }
+  function kindNote(c) {
+    if (c.kind === "Unverified") return "Unverified: probably public, not checked · ";
+    return c.kind && c.kind !== "Park" ? c.kind + " (open to public, checked) · " : "";
+  }
   function popup(c) {
     var box = el("div", { class: "pop" });
     if (c.photo) box.appendChild(el("img", { src: c.photo, alt: "Aerial view of " + c.name, loading: "lazy" }));
     box.appendChild(el("strong", { text: label(c) }));
     box.appendChild(el("div", { class: "meta", text: (c.lights === "likely" ? "Lights likely" : "Lights unknown") + (c.confirmed ? " · confirmed" : "") }));
     box.appendChild(el("div", { class: "links" }, [
-      el("a", { href: gmaps(c), target: "_blank", rel: "noopener", text: "Open in Google Maps" }),
+      el("a", { href: gmaps(c), target: "_blank", rel: "noopener", text: named(c) ? "Busy times on Google Maps" : "Open in Google Maps" }),
       el("a", { href: "https://www.google.com/maps/dir/?api=1&destination=" + c.lat + "," + c.lon, target: "_blank", rel: "noopener", text: "Directions" })
     ]));
     return box;
