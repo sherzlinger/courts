@@ -19,6 +19,9 @@
   a.chip { display: inline-flex; align-items: center; text-decoration: none; min-height: 40px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--text); font-weight: 600; font-size: 14px; }
   button.chip[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
   .count { color: var(--muted); font-size: 13px; }
+  #q { width: 100%; margin-top: 10px; min-height: 40px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .dist { color: var(--muted); font-size: 13px; }
   ul { list-style: none; margin: 0; padding: 8px; }
   li button { width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; margin-bottom: 6px; cursor: pointer; }
   li button:hover, li button[aria-current="true"] { border-color: var(--accent); }
@@ -40,8 +43,18 @@
     <header>
       <h1>Public Tennis Courts</h1>
       <div class="bar" id="areas" role="tablist" aria-label="Area"></div>
+      <label class="sr" for="q">Search courts by name</label>
+      <input id="q" type="search" placeholder="Search by name" autocomplete="off">
+      <div class="bar" style="margin-top:8px" role="group" aria-label="Type">
+        <button class="chip" data-kind="Park" aria-pressed="true">Parks</button>
+        <button class="chip" data-kind="School" aria-pressed="true">Schools</button>
+        <button class="chip" data-kind="Club" aria-pressed="true">Clubs</button>
+      </div>
       <div class="bar" style="margin-top:8px">
         <button class="chip" id="lights" aria-pressed="false">Lights likely</button>
+        <button class="chip" id="confirmed" aria-pressed="false">Confirmed only</button>
+        <button class="chip" id="multi" aria-pressed="false">2+ courts</button>
+        <button class="chip" id="near" aria-pressed="false">Near me</button>
         <span class="count" id="count"></span>
       </div>
     </header>
@@ -55,7 +68,20 @@
 (function () {
   var map = L.map("map", { zoomControl: true });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
-  var all = [], markers = {}, lightsOnly = false, sel = null;
+  var all = [], markers = {}, sel = null, me = null;
+  var F = { kinds: { Park: true, School: true, Club: true }, lights: false, confirmed: false, multi: false, q: "" };
+  try { var saved = JSON.parse(localStorage.getItem("filters") || "null"); if (saved && saved.kinds) { F = saved; F.q = ""; } } catch (e) {}
+  function save() { try { localStorage.setItem("filters", JSON.stringify(F)); } catch (e) {} }
+  function kindOf(c) { return c.kind || "Park"; }
+  function km(a, b, c, d) { var r = Math.PI / 180, x = (d - b) * r * Math.cos((a + c) / 2 * r), y = (c - a) * r; return 6371 * Math.sqrt(x * x + y * y); }
+  function passes(c) {
+    if (!F.kinds[kindOf(c)]) return false;
+    if (F.lights && c.lights !== "likely") return false;
+    if (F.confirmed && !c.confirmed) return false;
+    if (F.multi && !(c.courts > 1)) return false;
+    if (F.q && c.name.toLowerCase().indexOf(F.q) < 0) return false;
+    return true;
+  }
   function el(t, a, kids) { var n = document.createElement(t); for (var k in a || {}) { if (k === "text") n.textContent = a[k]; else n.setAttribute(k, a[k]); } (kids || []).forEach(function (c) { n.appendChild(c); }); return n; }
   function gmaps(c) { return "https://www.google.com/maps/search/?api=1&query=" + c.lat + "," + c.lon; }
   function label(c) { return c.name + (c.courts > 1 ? " · " + c.courts + " courts" : ""); }
@@ -72,19 +98,39 @@
     return box;
   }
   function render() {
-    var show = all.filter(function (c) { return !lightsOnly || c.lights === "likely"; });
+    var show = all.filter(passes);
+    if (me) show.sort(function (a, b) { return km(me[0], me[1], a.lat, a.lon) - km(me[0], me[1], b.lat, b.lon); });
     var list = document.getElementById("list"); list.replaceChildren();
     Object.keys(markers).forEach(function (k) { map.removeLayer(markers[k]); }); markers = {};
     show.forEach(function (c) {
       var m = L.marker([c.lat, c.lon], { title: label(c) }).bindPopup(function () { return popup(c); }).addTo(map); markers[c.n] = m;
-      var b = el("button", { type: "button" }, [el("div", { text: label(c) }), el("div", { class: "meta", text: kindNote(c) + (c.lights === "likely" ? "Lights likely" : "Lights unknown") })]);
+      var dist = me ? " · " + (km(me[0], me[1], c.lat, c.lon) / 1.609).toFixed(1) + " mi" : "";
+      var b = el("button", { type: "button" }, [el("div", { text: label(c) }), el("div", { class: "meta", text: kindNote(c) + (c.lights === "likely" ? "Lights likely" : "Lights unknown") + dist })]);
       b.addEventListener("click", function () { map.setView([c.lat, c.lon], 18); m.openPopup(); });
       var g = el("a", { class: "gm", href: gmaps(c), target: "_blank", rel: "noopener", "aria-label": "Open " + label(c) + " in Google Maps", text: "Google Maps ↗" });
       list.appendChild(el("li", {}, [b, g]));
     });
     document.getElementById("count").textContent = show.length + " of " + all.length + " courts";
   }
-  document.getElementById("lights").addEventListener("click", function () { lightsOnly = !lightsOnly; this.setAttribute("aria-pressed", String(lightsOnly)); render(); });
+  function syncChips() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-kind]"), function (b) { b.setAttribute("aria-pressed", String(!!F.kinds[b.dataset.kind])); });
+    ["lights", "confirmed", "multi"].forEach(function (k) { document.getElementById(k).setAttribute("aria-pressed", String(F[k])); });
+    document.getElementById("near").setAttribute("aria-pressed", String(!!me));
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-kind]"), function (b) {
+    b.addEventListener("click", function () { F.kinds[b.dataset.kind] = !F.kinds[b.dataset.kind]; save(); syncChips(); render(); });
+  });
+  ["lights", "confirmed", "multi"].forEach(function (k) {
+    document.getElementById(k).addEventListener("click", function () { F[k] = !F[k]; save(); syncChips(); render(); });
+  });
+  document.getElementById("q").addEventListener("input", function () { F.q = this.value.trim().toLowerCase(); render(); });
+  document.getElementById("near").addEventListener("click", function () {   // location stays in this browser; nothing is sent
+    if (me) { me = null; syncChips(); render(); return; }
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(function (p) { me = [p.coords.latitude, p.coords.longitude]; syncChips(); render(); map.setView(me, 13); },
+      function () { alert("Location not available. Allow location access to sort by distance."); }, { timeout: 10000 });
+  });
+  syncChips();
   function loadArea(a, btns) {
     btns.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.file === a.file)); });
     try { localStorage.setItem("area", a.file); } catch (e) {}
